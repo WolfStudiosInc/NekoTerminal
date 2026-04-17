@@ -3,7 +3,7 @@
 Neko Terminal v2.0 - A hacker-style custom terminal with SSH, code editor, AI, and full customization.
 """
 
-APP_VERSION = "2.0.6"
+APP_VERSION = "2.0.7"
 GITHUB_OWNER = "WolfStudiosInc"
 GITHUB_REPO = "NekoTerminal"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
@@ -413,6 +413,10 @@ class Updater:
                             progress_callback(f"Downloading... {pct}%")
                             last_pct = pct
 
+        if total_size > 0 and downloaded != total_size:
+            os.remove(tmp_download)
+            raise RuntimeError(f"Download incomplete! Received {downloaded} out of {total_size} bytes. Please try again.")
+
         if os.path.getsize(tmp_download) < 1000:
             os.remove(tmp_download)
             raise RuntimeError("Downloaded file seems too small — aborting to be safe.")
@@ -497,7 +501,7 @@ class Updater:
             f"del /f /q \"{current_exe}\" >nul 2>&1\r\n"
             f"if exist \"{current_exe}\" goto waitloop\r\n"
             f"ren \"{new_exe}\" \"{exe_name}\"\r\n"
-            f"start \"\" \"{target_exe}\"\r\n"
+            f"start \"\" /d \"{exe_dir}\" \"{target_exe}\"\r\n"
             "(goto) 2>nul & del /f /q \"%~f0\"\r\n"
         )
 
