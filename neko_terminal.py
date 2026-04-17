@@ -3,7 +3,7 @@
 Neko Terminal v2.0 - A hacker-style custom terminal with SSH, code editor, AI, and full customization.
 """
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.3"
 GITHUB_OWNER = "WolfStudiosInc"
 GITHUB_REPO = "NekoTerminal"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
