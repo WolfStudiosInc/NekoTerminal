@@ -1,0 +1,9 @@
+__pycache__/
+build/
+dist/
+*.spec
+*.bak
+.neko_key
+neko_config.json
+neko_history.json
+neko_ai_history.json
