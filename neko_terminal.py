@@ -3,7 +3,7 @@
 Neko Terminal v2.0 - A hacker-style custom terminal with SSH, code editor, AI, and full customization.
 """
 
-APP_VERSION = "2.0.4"
+APP_VERSION = "2.0.5"
 GITHUB_OWNER = "WolfStudiosInc"
 GITHUB_REPO = "NekoTerminal"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
@@ -355,34 +355,62 @@ class Updater:
         return has_update, self.latest_tag, self.release_notes
 
     def download_and_apply(self, progress_callback=None):
-        """Download the update and apply it.
-        - In .py mode: replaces neko_terminal.py directly with a .bak backup.
-        - In .exe mode: downloads new exe next to the current one, creates a
-          small batch script that swaps them after the app exits, then the app
-          restarts itself.
-        Creates a .bak backup first. Returns True on success."""
+        """Download the update and apply it."""
         if not self.download_url:
             raise RuntimeError("No download URL available. Check for updates first.")
 
         if progress_callback:
-            progress_callback("Downloading update...")
+            progress_callback("Preparing download...")
 
         req = urllib.request.Request(self.download_url, method="GET")
         req.add_header("User-Agent", f"NekoTerminal/{APP_VERSION}")
 
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            new_content = resp.read()
+        # Determine download path
+        if IS_FROZEN:
+            current_exe = sys.executable
+            exe_dir = os.path.dirname(current_exe)
+            new_exe = os.path.join(exe_dir, "NekoTerminal_update.exe")
+            tmp_download = new_exe + ".tmp"
+        else:
+            current_file = os.path.abspath(__file__)
+            tmp_download = current_file + ".tmp"
 
-        if len(new_content) < 1000:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            total_size = int(resp.getheader("Content-Length", 0))
+            downloaded = 0
+            last_pct = -1
+            
+            with open(tmp_download, "wb") as f:
+                while True:
+                    chunk = resp.read(8192 * 16) # 128KB chunks
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback and total_size > 0:
+                        pct = int((downloaded / total_size) * 100)
+                        if pct != last_pct and pct % 5 == 0:  # Update UI every 5%
+                            progress_callback(f"Downloading... {pct}%")
+                            last_pct = pct
+
+        if os.path.getsize(tmp_download) < 1000:
+            os.remove(tmp_download)
             raise RuntimeError("Downloaded file seems too small — aborting to be safe.")
 
         if IS_FROZEN:
-            return self._apply_exe_update(new_content, progress_callback)
+            # We rename the .tmp to .exe here rapidly
+            if os.path.exists(new_exe):
+                try:
+                    os.remove(new_exe)
+                except Exception:
+                    pass
+            os.rename(tmp_download, new_exe)
+            return self._apply_exe_update(progress_callback)
         else:
-            return self._apply_py_update(new_content, progress_callback)
+            return self._apply_py_update(tmp_download, progress_callback)
 
-    def _apply_py_update(self, new_content, progress_callback=None):
-        """Replace the running .py script with the downloaded version."""
+    def _apply_py_update(self, tmp_download, progress_callback=None):
+        """Replace the running .py script with the downloaded tmp file."""
         current_file = os.path.abspath(__file__)
         backup_file = current_file + ".bak"
 
@@ -393,14 +421,17 @@ class Updater:
         try:
             shutil.copy2(current_file, backup_file)
         except Exception as e:
+            try:
+                os.remove(tmp_download)
+            except Exception:
+                pass
             raise RuntimeError(f"Failed to create backup: {e}")
 
         if progress_callback:
             progress_callback("Installing update...")
 
         try:
-            with open(current_file, "wb") as f:
-                f.write(new_content)
+            shutil.move(tmp_download, current_file)
         except Exception as e:
             try:
                 shutil.copy2(backup_file, current_file)
@@ -412,7 +443,7 @@ class Updater:
             progress_callback("Update installed!")
         return True
 
-    def _apply_exe_update(self, new_content, progress_callback=None):
+    def _apply_exe_update(self, progress_callback=None):
         """Apply update when running as a compiled .exe.
         Since a running exe can't overwrite itself on Windows, we:
         1. Save the new exe as NekoTerminal_update.exe next to the current one
@@ -428,15 +459,6 @@ class Updater:
         target_exe = os.path.join(exe_dir, exe_name)
         new_exe = os.path.join(exe_dir, "NekoTerminal_update.exe")
         updater_bat = os.path.join(exe_dir, "_neko_update.bat")
-
-        if progress_callback:
-            progress_callback("Saving new version...")
-
-        try:
-            with open(new_exe, "wb") as f:
-                f.write(new_content)
-        except Exception as e:
-            raise RuntimeError(f"Failed to save new exe: {e}")
 
         if progress_callback:
             progress_callback("Preparing updater...")
@@ -2578,8 +2600,10 @@ class SettingsWindow(tk.Toplevel):
         self._check_btn.configure(state=tk.DISABLED)
 
         def _progress(msg):
-            self.after(0, lambda: self._update_status.configure(
-                text=f"⏳ {msg}", fg="#ffaa00"))
+            def _update():
+                self._update_status.configure(text=f"⏳ {msg}", fg="#ffaa00")
+                self.update_idletasks()
+            self.after(0, _update)
 
         def _worker():
             try:
