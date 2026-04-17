@@ -3,7 +3,7 @@
 Neko Terminal v2.0 - A hacker-style custom terminal with SSH, code editor, AI, and full customization.
 """
 
-APP_VERSION = "2.0.5"
+APP_VERSION = "2.0.6"
 GITHUB_OWNER = "WolfStudiosInc"
 GITHUB_REPO = "NekoTerminal"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
@@ -321,35 +321,55 @@ class Updater:
         """Check GitHub Releases for a newer version.
         Returns: (has_update: bool, latest_tag: str, release_notes: str)
         Raises on network/API errors."""
-        req = urllib.request.Request(GITHUB_API_URL, method="GET")
-        req.add_header("Accept", "application/vnd.github+json")
-        req.add_header("User-Agent", f"NekoTerminal/{APP_VERSION}")
+        try:
+            req = urllib.request.Request(GITHUB_API_URL, method="GET")
+            req.add_header("Accept", "application/vnd.github+json")
+            req.add_header("User-Agent", f"NekoTerminal/{APP_VERSION}")
 
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
 
-        self.latest_tag = data.get("tag_name", "")
-        self.release_notes = data.get("body", "No release notes.")
-        self.release_page_url = data.get("html_url", "")
+            self.latest_tag = data.get("tag_name", "")
+            self.release_notes = data.get("body", "No release notes.")
+            self.release_page_url = data.get("html_url", "")
+            
+            # Determine what asset to look for based on run mode
+            self.download_url = None
+            if IS_FROZEN:
+                for asset in data.get("assets", []):
+                    name = asset.get("name", "").lower()
+                    if name.endswith(".exe") and "neko" in name:
+                        self.download_url = asset.get("browser_download_url")
+                        break
+            else:
+                for asset in data.get("assets", []):
+                    name = asset.get("name", "").lower()
+                    if name == "neko_terminal.py":
+                        self.download_url = asset.get("browser_download_url")
+                        break
+                        
+        except urllib.error.HTTPError as e:
+            # Fallback if API rate limited (e.g. 403 Forbidden)
+            fallback_url = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+            req = urllib.request.Request(fallback_url, method="HEAD")
+            req.add_header("User-Agent", f"NekoTerminal/{APP_VERSION}")
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                final_url = resp.url
+            
+            # The final URL should be .../releases/tag/vX.Y.Z
+            self.latest_tag = final_url.split("/")[-1]
+            self.release_notes = "Release notes unavailable (API rate limited)."
+            self.release_page_url = final_url
+            
+            # Manually construct the download URL
+            base_download_url = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/download/{self.latest_tag}"
+            if IS_FROZEN:
+                self.download_url = f"{base_download_url}/NekoTerminal.exe"
+            else:
+                self.download_url = f"{base_download_url}/neko_terminal.py"
+
         self.latest_version = self._parse_version(self.latest_tag)
         current_version = self._parse_version(APP_VERSION)
-
-        # Determine what asset to look for based on run mode
-        self.download_url = None
-        if IS_FROZEN:
-            # Running as compiled exe — look for .exe asset
-            for asset in data.get("assets", []):
-                name = asset.get("name", "").lower()
-                if name.endswith(".exe") and "neko" in name:
-                    self.download_url = asset.get("browser_download_url")
-                    break
-        else:
-            # Running as .py script — look for neko_terminal.py asset
-            for asset in data.get("assets", []):
-                name = asset.get("name", "").lower()
-                if name == "neko_terminal.py":
-                    self.download_url = asset.get("browser_download_url")
-                    break
 
         has_update = self.latest_version > current_version
         return has_update, self.latest_tag, self.release_notes
