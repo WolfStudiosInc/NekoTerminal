@@ -3,7 +3,7 @@
 Neko Terminal v2.0 - A hacker-style custom terminal with SSH, code editor, AI, and full customization.
 """
 
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.0.4"
 GITHUB_OWNER = "WolfStudiosInc"
 GITHUB_REPO = "NekoTerminal"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
@@ -450,9 +450,11 @@ class Updater:
         batch_content = (
             "@echo off\r\n"
             "title Neko Terminal Updater\r\n"
-            "timeout /t 3 /nobreak >nul\r\n"
-            f"if exist \"{current_exe}\" del /f /q \"{current_exe}\"\r\n"
-            f"if exist \"{new_exe}\" ren \"{new_exe}\" \"{exe_name}\"\r\n"
+            ":waitloop\r\n"
+            "timeout /t 1 /nobreak >nul\r\n"
+            f"del /f /q \"{current_exe}\" >nul 2>&1\r\n"
+            f"if exist \"{current_exe}\" goto waitloop\r\n"
+            f"ren \"{new_exe}\" \"{exe_name}\"\r\n"
             f"start \"\" \"{target_exe}\"\r\n"
             "(goto) 2>nul & del /f /q \"%~f0\"\r\n"
         )
@@ -2606,9 +2608,8 @@ class SettingsWindow(tk.Toplevel):
                 if updater_bat and os.path.exists(updater_bat):
                     # Run the bat fully detached so it outlives this process
                     subprocess.Popen(
-                        ['cmd', '/c', 'start', '', '/b', updater_bat],
-                        shell=True,
-                        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                        ['cmd.exe', '/c', updater_bat],
+                        creationflags=subprocess.CREATE_NO_WINDOW,
                         close_fds=True
                     )
                 self.master.destroy()
