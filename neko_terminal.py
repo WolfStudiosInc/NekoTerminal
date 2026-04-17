@@ -3,7 +3,7 @@
 Neko Terminal v2.0 - A hacker-style custom terminal with SSH, code editor, AI, and full customization.
 """
 
-APP_VERSION = "2.0.1"
+APP_VERSION = "1.0.0"
 GITHUB_OWNER = "WolfStudiosInc"
 GITHUB_REPO = "NekoTerminal"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
@@ -415,14 +415,18 @@ class Updater:
     def _apply_exe_update(self, new_content, progress_callback=None):
         """Apply update when running as a compiled .exe.
         Since a running exe can't overwrite itself on Windows, we:
-        1. Save the new exe as NekoTerminal_new.exe
-        2. Create an updater.bat that waits, swaps files, and relaunches
-        The batch script runs after the app exits."""
+        1. Save the new exe as NekoTerminal_update.exe next to the current one
+        2. Create _neko_update.bat that waits, deletes the old exe,
+           renames the new one to NekoTerminal.exe, relaunches it,
+           then deletes itself.
+        The batch script is launched right before the app exits."""
         current_exe = sys.executable
         exe_dir = os.path.dirname(current_exe)
-        exe_name = os.path.basename(current_exe)
-        new_exe = os.path.join(exe_dir, "NekoTerminal_new.exe")
-        backup_exe = os.path.join(exe_dir, exe_name + ".bak")
+        # Always keep the name as NekoTerminal.exe regardless of what the
+        # current exe is called
+        exe_name = "NekoTerminal.exe"
+        target_exe = os.path.join(exe_dir, exe_name)
+        new_exe = os.path.join(exe_dir, "NekoTerminal_update.exe")
         updater_bat = os.path.join(exe_dir, "_neko_update.bat")
 
         if progress_callback:
@@ -437,41 +441,38 @@ class Updater:
         if progress_callback:
             progress_callback("Preparing updater...")
 
-        # Create a batch script that:
-        # 1. Waits for the current exe to close
-        # 2. Backs up the old exe
-        # 3. Renames the new exe to the original name
-        # 4. Relaunches the app
-        # 5. Cleans up the batch script itself
-        batch_content = f"""@echo off
-title Neko Terminal Updater
-echo Updating Neko Terminal...
-timeout /t 2 /nobreak >nul
-if exist "{current_exe}" (
-    if exist "{backup_exe}" del /f "{backup_exe}"
-    rename "{current_exe}" "{exe_name}.bak"
-)
-rename "{new_exe}" "{exe_name}"
-echo Update complete! Restarting...
-start "" "{current_exe}"
-del /f "%~f0"
-"""
+        # Batch script:
+        # 1. Wait for app to fully exit
+        # 2. Delete the old exe
+        # 3. Rename the new exe to NekoTerminal.exe
+        # 4. Launch the updated app
+        # 5. Delete this bat script itself
+        batch_content = (
+            "@echo off\r\n"
+            "title Neko Terminal Updater\r\n"
+            "timeout /t 3 /nobreak >nul\r\n"
+            f"if exist \"{current_exe}\" del /f /q \"{current_exe}\"\r\n"
+            f"if exist \"{new_exe}\" ren \"{new_exe}\" \"{exe_name}\"\r\n"
+            f"start \"\" \"{target_exe}\"\r\n"
+            "(goto) 2>nul & del /f /q \"%~f0\"\r\n"
+        )
+
         try:
             with open(updater_bat, "w") as f:
                 f.write(batch_content)
         except Exception as e:
-            # Clean up downloaded exe
             try:
                 os.remove(new_exe)
             except Exception:
                 pass
             raise RuntimeError(f"Failed to create updater script: {e}")
 
-        # Store the batch path so the restart handler can launch it
+        # Store paths so the restart handler can launch the bat
         self._updater_bat = updater_bat
+        self._target_exe = target_exe
 
         if progress_callback:
-            progress_callback("Update ready! Restart to apply.")
+            progress_callback("Update ready! Restarting...")
         return True
 
 
@@ -2598,22 +2599,22 @@ class SettingsWindow(tk.Toplevel):
         if IS_FROZEN:
             restart = messagebox.askyesno("Update Complete",
                 f"Neko Terminal {self._updater.latest_tag} is ready!\n\n"
-                f"The app will close and reopen with the new version.\n"
-                f"A backup of the old version will be kept.\n\n"
+                f"The app will now close and relaunch with the new version.\n\n"
                 f"Restart now?")
             if restart:
-                # Launch the batch updater script, then exit
                 updater_bat = getattr(self._updater, '_updater_bat', None)
                 if updater_bat and os.path.exists(updater_bat):
+                    # Run the bat fully detached so it outlives this process
                     subprocess.Popen(
-                        ['cmd', '/c', updater_bat],
-                        creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+                        ['cmd', '/c', 'start', '', '/b', updater_bat],
+                        shell=True,
+                        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                        close_fds=True
                     )
                 self.master.destroy()
         else:
             restart = messagebox.askyesno("Update Complete",
                 f"Neko Terminal has been updated to {self._updater.latest_tag}!\n\n"
-                f"A backup was saved as neko_terminal.py.bak\n\n"
                 f"Restart now to apply the update?")
             if restart:
                 python = sys.executable
